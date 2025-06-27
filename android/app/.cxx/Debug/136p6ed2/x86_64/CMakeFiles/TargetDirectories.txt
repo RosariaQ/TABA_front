@@ -1,0 +1,2 @@
+/home/rosaria01/문서/Cursor/front_flutter/Week11/v3/android/app/.cxx/Debug/136p6ed2/x86_64/CMakeFiles/edit_cache.dir
+/home/rosaria01/문서/Cursor/front_flutter/Week11/v3/android/app/.cxx/Debug/136p6ed2/x86_64/CMakeFiles/rebuild_cache.dir

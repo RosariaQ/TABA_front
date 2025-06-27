@@ -1,0 +1,1 @@
+/home/rosaria01/문서/Cursor/front_flutter/Week11/v3/build/app/intermediates/cxx/Debug/136p6ed2/obj/arm64-v8a

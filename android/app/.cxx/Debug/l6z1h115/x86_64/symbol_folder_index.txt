@@ -1,0 +1,1 @@
+/home/rosaria01/문서/Cursor/front_flutter/Week10/refactoring/build/app/intermediates/cxx/Debug/l6z1h115/obj/x86_64

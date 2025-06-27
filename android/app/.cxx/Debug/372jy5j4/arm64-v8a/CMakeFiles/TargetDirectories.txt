@@ -1,0 +1,2 @@
+C:/Users/pc/Documents/1. Code/healthapp/healthapp/android/app/.cxx/Debug/372jy5j4/arm64-v8a/CMakeFiles/edit_cache.dir
+C:/Users/pc/Documents/1. Code/healthapp/healthapp/android/app/.cxx/Debug/372jy5j4/arm64-v8a/CMakeFiles/rebuild_cache.dir
