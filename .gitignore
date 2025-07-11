@@ -1,0 +1,23 @@
+# Build
+build/
+ios/Flutter/
+ios/Pods/
+android/.gradle/
+android/app/build/
+
+# Dart & Flutter
+.dart_tool/
+.packages
+.pub/
+*.lock
+
+# IDE
+.idea/
+.vscode/
+
+# System
+.DS_Store
+*.log
+
+# 환경 변수
+.env
