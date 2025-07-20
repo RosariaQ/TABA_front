@@ -1,24 +1,39 @@
 // lib/dashboardPage/widgets/daily_status_summary_card.dart
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:healthymeal/dailystatusPage/service/dailystatusservice.dart';
+import 'package:healthymeal/dailystatusPage/model/mealinfo.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-// TODO: 실제 앱에서는 DailyStatusService를 통해 데이터를 가져와야 합니다.
-// import 'package:healthymeal/dailystatusPage/service/dailystatusservice.dart';
+// 화면에 표시할 "섭취량 vs 기준" 데이터 (dailystatusPage와 동일)
+class IntakeData {
+  final String nutrientName;
+  final double requiredIntake;
+  final double intakeAmount;
+  final String intakeUnit;
+
+  IntakeData(
+    this.nutrientName,
+    this.requiredIntake,
+    this.intakeAmount,
+    this.intakeUnit,
+  );
+}
 
 class DailyStatusSummaryCard extends StatefulWidget {
-  final double scale; // 카드 클릭 시 애니메이션을 위한 스케일 값
-  final Function(TapDownDetails) onTapDown; // 탭 다운 이벤트 콜백
-  final Function(TapUpDetails) onTapUp; // 탭 업 이벤트 콜백
-  final VoidCallback onTapCancel; // 탭 취소 이벤트 콜백
-  final VoidCallback? onTap; // 카드 전체 탭 이벤트 콜백 (페이지 이동 등)
+  final double scale;
+  final Function(TapDownDetails) onTapDown;
+  final Function(TapUpDetails) onTapUp;
+  final VoidCallback onTapCancel;
+  final VoidCallback? onTap;
 
   const DailyStatusSummaryCard({
-    super.key, // 애니메이션 강제 리부트를 위해 key를 받을 수 있도록 수정
+    super.key,
     required this.scale,
     required this.onTapDown,
     required this.onTapUp,
     required this.onTapCancel,
-    this.onTap, // onTap 콜백 추가
+    this.onTap,
   });
 
   @override
@@ -26,123 +41,296 @@ class DailyStatusSummaryCard extends StatefulWidget {
 }
 
 class _DailyStatusSummaryCardState extends State<DailyStatusSummaryCard> {
-  // 추후 API Request를 위한 Service 인스턴스 (현재는 주석 처리)
-  // final DailyStatusService _dailyStatusService = DailyStatusService(baseUrl: "YOUR_API_BASE_URL");
-
-  // TODO: 이 데이터는 실제 API 호출 또는 상태 관리를 통해 동적으로 받아와야 합니다.
-  // 현재는 예시용 하드코딩된 데이터입니다.
-  final List<Map<String, dynamic>> _nutrientsData = const [
-    {"label": "탄수화물", "value": 0.75, "target": 100.0, "current": 75.0, "unit": "g"}, // 목표치, 현재치, 단위 추가
-    {"label": "단백질", "value": 0.90, "target": 60.0, "current": 54.0, "unit": "g"},
-    {"label": "지방", "value": 0.55, "target": 50.0, "current": 27.5, "unit": "g"},
-    {"label": "나트륨", "value": 0.80, "target": 2000.0, "current": 1600.0, "unit": "mg"},
-    {"label": "식이섬유", "value": 0.60, "target": 25.0, "current": 15.0, "unit": "g"},
-    // {"label": "당류", "value": 0.5, "color": Colors.lightBlue}, // 필요시 추가
-    // {"label": "콜레스테롤", "value": 0.85, "color": Colors.deepOrange}, // 필요시 추가
-  ];
-
-  // DailyStatus Widget을 위한 Service class
-  final DailyStatusService _dailyStatusService = DailyStatusService();
-
+  final DailyStatusService _svc = DailyStatusService();
+  
+  bool _isLoading = true;
+  List<IntakeData> _intakes = [];
+  
+  // 가중치 맵 추가
+  Map<String, double> _weights = {
+    '칼로리':     0.0,
+    '탄수화물':   0.0,
+    '지방':       0.0,
+    '단백질':     0.0,
+    '식이섬유':   0.0,
+    '당류':       0.0,
+    '나트륨':     0.0,
+    '콜레스테롤': 0.0,
+  };
+  
   @override
   void initState() {
     super.initState();
+    _loadNutritionPreferences().then((_) => _loadNutritionData());
   }
+  
+  /// SharedPreferences에 저장된 가중치(JSON)를 불러와 _weights에 적용
+  Future<void> _loadNutritionPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonStr = prefs.getString('nutrition_preferences');
+    if (jsonStr == null) return;
+    final Map<String, dynamic> map = jsonDecode(jsonStr);
+    map.forEach((key, value) {
+      if (_weights.containsKey(key)) {
+        _weights[key] = (value as num).toDouble();
+      }
+    });
+  }
+  
+  Future<void> _loadNutritionData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('userId') ?? "";
+      
+      if (userId.isEmpty) {
+        setState(() {
+          _isLoading = false;
+        });
+        return;
+      }
+      
+      // 1) 유저 정보
+      final userInfo = await _svc.getUserInfo(userId); // [gender, age]
+      
+      // 2) 권장 섭취 기준
+      final crit = await _svc.fetchCriterion(
+        int.parse(userInfo[1]),
+        userInfo[0],
+      );
+      
+      // 3) 오늘의 식사 기록
+      final meals = await _svc.fetchMeals(userId);
+      
+      // 4) 전체 영양소 합계 계산
+      double tCarb = 0, tProt = 0, tFat = 0,
+          tSod = 0, tCell = 0, tSugar = 0,
+          tChol = 0, tCal = 0;
 
-  // 진행률 바의 색상을 결정하는 함수
-  Color _getProgressColor(double animatedValue) {
-    if (animatedValue <= 0.3) return Colors.red.shade400; // 부족
-    if (animatedValue <= 0.6) return Colors.orange.shade400; // 약간 부족
-    if (animatedValue <= 0.9) return Colors.amber.shade500; // 적정 근접
-    if (animatedValue <= 1.1) return Colors.lightGreen.shade500; // 적정
-    return Colors.green.shade600; // 충분 또는 초과 (색상 조정 가능)
+      for (var m in meals) {
+        tCarb += m.carbonhydrate_g;
+        tProt += m.protein_g;
+        tFat  += m.fat_g;
+        tSod  += m.sodium_mg;
+        tCell += m.cellulose_g;
+        tSugar+= m.sugar_g;
+        tChol += m.cholesterol_mg;
+        tCal  += m.Kcal_g;
+      }
+      
+      // 5) 가중치 함수 적용 
+      double w(String key) => 1 + (_weights[key] ?? 0);
+      
+      // 6) IntakeData 리스트 생성 (8개 영양소) - 가중치 적용
+      final intakes = [
+        IntakeData("칼로리",    crit[7] * w("칼로리"), tCal,   "kcal"),
+        IntakeData("탄수화물",  crit[0] * w("탄수화물"), tCarb,  "g"),
+        IntakeData("단백질",    crit[1] * w("단백질"), tProt,  "g"),
+        IntakeData("지방",      crit[2] * w("지방"), tFat,   "g"),
+        IntakeData("나트륨",    crit[3] * w("나트륨"), tSod,   "mg"),
+        IntakeData("식이섬유",  crit[4] * w("식이섬유"), tCell,  "g"),
+        IntakeData("당류",      crit[5] * w("당류"), tSugar, "g"),
+        IntakeData("콜레스테롤", crit[6] * w("콜레스테롤"), tChol,  "mg"),
+      ];
+      
+      setState(() {
+        _intakes = intakes;
+        _isLoading = false;
+      });
+      
+    } catch (e) {
+      print('영양 데이터 로드 중 오류: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+  
+  // 비율에 따른 색상 결정 (dailystatusPage의 IntakeLevel과 동일한 로직)
+  Color _getColorForRatio(double ratio) {
+    if (ratio <= 0.5) {
+      return Colors.yellow.shade400;  // 0-50%: 노랑
+    } else if (ratio <= 1.0) {
+      return Colors.green.shade500;   // 50-100%: 초록
+    } else if (ratio <= 1.5) {
+      return Colors.yellow.shade400;  // 100-150%: 노랑
+    } else {
+      return Colors.red.shade400;     // 150% 이상: 빨강
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-      child: GestureDetector( // 카드 전체에 탭 효과 및 이벤트 적용
+      child: GestureDetector(
         onTapDown: widget.onTapDown,
         onTapUp: widget.onTapUp,
         onTapCancel: widget.onTapCancel,
-        onTap: widget.onTap, // 전체 탭 이벤트 연결
-        child: AnimatedScale( // 탭 시 카드 크기 변경 애니메이션
+        onTap: widget.onTap,
+        child: AnimatedScale(
           scale: widget.scale,
           duration: const Duration(milliseconds: 150),
           child: Card(
-            color: const Color(0xFFFCFCFC), // 카드 배경색
-            elevation: 4, // 그림자 깊이
-            shadowColor: Colors.grey.withAlpha(50), // 그림자 색상 및 투명도
+            color: const Color(0xFFFCFCFC),
+            elevation: 4,
+            shadowColor: Colors.grey.withAlpha(50),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18), // 카드 모서리 둥글게
-              side: BorderSide(color: Colors.grey.shade200, width: 0.5), // 카드 테두리
+              borderRadius: BorderRadius.circular(18),
+              side: BorderSide(color: Colors.grey.shade200, width: 0.5),
             ),
             child: Padding(
-              padding: const EdgeInsets.all(20), // 카드 내부 패딩
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    "오늘의 영양 상태 요약", // 카드 제목
-                    style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black87),
-                  ),
-                  const SizedBox(height: 16),
-                  // 각 영양소별 진행률 표시
-                  ..._nutrientsData.map((item) {
-                    final double value = item["value"]! as double; // 목표 대비 현재 섭취 비율
-                    final String label = item["label"]! as String;
-                    final double currentAmount = item["current"]! as double;
-                    final double targetAmount = item["target"]! as double;
-                    final String unit = item["unit"]! as String;
-
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8), // 각 항목 간 수직 여백
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row( // 영양소 이름과 현재/목표 섭취량 표시
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(label,
-                                  style: const TextStyle(
-                                      fontSize: 14, color: Colors.black54, fontWeight: FontWeight.w500)),
-                              Text('${currentAmount.toStringAsFixed(1)}$unit / ${targetAmount.toStringAsFixed(1)}$unit',
-                                  style: TextStyle(
-                                      fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w500)),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          // 애니메이션과 함께 진행률 바 표시
-                          TweenAnimationBuilder<double>(
-                            tween: Tween(begin: 0.0, end: value), // 0에서 실제 값까지 애니메이션
-                            duration: Duration(
-                                milliseconds: 800 + (value * 200).toInt()), // 값에 따라 애니메이션 시간 조절
-                            curve: Curves.easeInOutCubic, // 애니메이션 커브
-                            builder: (context, animatedValue, child) {
-                              // 진행률 바 위젯
-                              return LinearProgressIndicator(
-                                value: animatedValue.clamp(0.0, 1.0), // 값은 0.0과 1.0 사이로 제한
-                                backgroundColor: Colors.grey.shade300, // 바 배경색
-                                color: _getProgressColor(animatedValue), // 바 색상 (값에 따라 동적 변경)
-                                minHeight: 10, // 바 최소 높이
-                                borderRadius: BorderRadius.circular(10), // 바 모서리 둥글게
-                              );
-                            },
-                          ),
-                        ],
-                      ),
-                    );
-                  }),
-                ],
-              ),
+              padding: const EdgeInsets.all(20),
+              child: _buildCardContent(),
             ),
           ),
         ),
       ),
+    );
+  }
+  
+  Widget _buildCardContent() {
+    if (_isLoading) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: 40),
+          child: CircularProgressIndicator(),
+        ),
+      );
+    }
+    
+    if (_intakes.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: 20),
+          child: Text(
+            "오늘의 식사 기록이 없습니다.",
+            style: TextStyle(color: Colors.grey),
+          ),
+        ),
+      );
+    }
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          "오늘의 영양 상태 요약",
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Colors.black87
+          ),
+        ),
+        const SizedBox(height: 16),
+        
+        // 8개 영양소 표시
+        ..._intakes.map((intake) {
+          // 비율 계산
+          double ratio = 0;
+          if (intake.requiredIntake > 0) {
+            ratio = intake.intakeAmount / intake.requiredIntake;
+          }
+          
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: _buildSimpleNutrientBar(intake, ratio),
+          );
+        }),
+      ],
+    );
+  }
+  
+  // 간단한 영양소 바 위젯
+  Widget _buildSimpleNutrientBar(IntakeData intake, double ratio) {
+    final color = _getColorForRatio(ratio);
+    final percentage = (ratio * 100).toStringAsFixed(0);
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 영양소명과 섭취량/권장량
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              intake.nutrientName,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Colors.black87,
+              ),
+            ),
+            Text(
+              '${intake.intakeAmount.toStringAsFixed(1)}/${intake.requiredIntake.toStringAsFixed(0)}${intake.intakeUnit}',
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.grey.shade600,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        
+        // 프로그레스 바
+        Stack(
+          children: [
+            // 배경 바
+            Container(
+              height: 8,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade200,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+            // 채워진 바
+            FractionallySizedBox(
+              widthFactor: ratio.clamp(0.0, 2.0) / 2.0, // 최대 200%까지 표시
+              child: Container(
+                height: 8,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+            // 100% 위치 표시 (선택사항)
+            if (ratio > 1.0)
+              Positioned(
+                left: MediaQuery.of(context).size.width * 0.35, // 대략적인 50% 위치
+                child: Container(
+                  width: 1,
+                  height: 8,
+                  color: Colors.grey.shade400,
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 2),
+        
+        // 퍼센티지 표시
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              '$percentage%',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: color,
+              ),
+            ),
+            if (ratio > 1.0)
+              Text(
+                ratio <= 1.5 ? '적정 초과' : '과다 섭취',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: color,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+          ],
+        ),
+      ],
     );
   }
 }
